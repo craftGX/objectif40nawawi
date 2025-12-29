@@ -165,6 +165,7 @@
         letter-spacing: 0.02em;
       }
 
+      /* on garde UNIQUEMENT ce style comme contenant */
       #progressBar {
         width: 100%;
         height: 10px;
@@ -175,12 +176,12 @@
         border: 1px solid rgba(148, 163, 184, 0.35);
       }
 
+      /* barre interne animée */
       #progressFill {
         height: 100%;
-        background: linear-gradient(90deg, var(--accent-blue) 0%, var(--accent-green) 100%);
-        border-radius: 999px;
         width: 0;
-        transition: width 0.4s;
+        background: linear-gradient(90deg, var(--accent-blue), var(--accent-green));
+        transition: width 0.2s ease;
       }
 
       .btn {
@@ -220,6 +221,19 @@
       .btn-secondary:hover {
         background: rgba(15, 23, 42, 1);
         transform: translateY(-1px);
+      }
+
+      .btn-primary {
+        background: linear-gradient(135deg, var(--accent-blue), var(--accent-green));
+        color: #0b1020;
+        box-shadow: 0 10px 22px rgba(0, 169, 224, 0.45);
+        border: 1px solid rgba(56, 189, 248, 0.8);
+      }
+
+      .btn-primary:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 14px 28px rgba(56, 189, 248, 0.65);
+        filter: brightness(1.05);
       }
 
       .actions-row {
@@ -460,6 +474,47 @@
         padding: 8px 10px;
       }
 
+      /* Popup de confirmation */
+      .confirm-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.85);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 999;
+      }
+
+      .confirm-modal {
+        background: radial-gradient(circle at top, rgba(0, 169, 224, 0.22), #020617 55%);
+        border-radius: 16px;
+        padding: 18px 18px 14px;
+        width: min(420px, 90vw);
+        border: 1px solid rgba(148, 163, 184, 0.6);
+        box-shadow: 0 22px 50px rgba(15, 23, 42, 0.95);
+      }
+
+      .confirm-title {
+        font-size: 0.95rem;
+        font-weight: 600;
+        margin-bottom: 8px;
+        color: var(--accent-blue);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .confirm-message {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        margin-bottom: 14px;
+      }
+
+      .confirm-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
       @media (max-width: 640px) {
         .app {
           max-width: 98vw;
@@ -496,12 +551,15 @@
             </div>
 
             <div id="progressText"></div>
-            <div id="progressBar"><div id="progressFill"></div></div>
+            <div id="progressBar">
+              <div id="progressFill"></div>
+            </div>
 
             <ul id="todos"></ul>
 
             <div class="actions-row">
               <button id="resetDay" class="btn btn-danger">Reset journée</button>
+              <button id="validateDay" class="btn btn-primary">Valider la journée</button>
             </div>
 
             <div class="intent-box" id="intentBox" style="display: none"></div>
@@ -581,7 +639,20 @@
       </div>
     </div>
 
+    <!-- Popup de confirmation -->
+    <div id="confirmOverlay" class="confirm-overlay" style="display: none">
+      <div class="confirm-modal">
+        <div class="confirm-title">Confirmer</div>
+        <div class="confirm-message" id="confirmMessage">Es-tu sûr ?</div>
+        <div class="confirm-actions">
+          <button id="confirmCancel" class="btn btn-secondary">Annuler</button>
+          <button id="confirmOk" class="btn btn-primary">Valider</button>
+        </div>
+      </div>
+    </div>
+
     <script>
+      // --------- DONNÉES DE BASE ---------
       const OBJECTIFS = [
         "Faire chaque acte avec une intention sincère",
         "Réciter la chahada et renouveler ma foi",
@@ -605,7 +676,9 @@
         "Demander pardon pour mes erreurs",
       ];
 
-      // --- Date helpers ---
+      const STORAGE_KEY = "nawawiDaily_simple";
+
+      // --------- HELPERS ---------
       function todayKey() {
         const d = new Date();
         const y = d.getFullYear();
@@ -614,60 +687,71 @@
         return `${y}-${m}-${day}`;
       }
 
-      function formatDateFR(key) {
-        const [y, m, d] = key.split("-").map(Number);
-        const date = new Date(y, m - 1, d);
-        const options = { weekday: "long", year: "numeric", month: "long", day: "numeric" };
-        return date.toLocaleDateString("fr-FR", options); // ex: samedi 29 décembre 2025
-      }
-
-      // --- Storage ---
-      function getDailyData() {
+      function loadState() {
         try {
-          const raw = localStorage.getItem("nawawiDaily");
-          const obj = raw ? JSON.parse(raw) : {};
-          return typeof obj === "object" && obj !== null ? obj : {};
+          const raw = localStorage.getItem(STORAGE_KEY);
+          const data = raw ? JSON.parse(raw) : {};
+          return typeof data === "object" && data !== null ? data : {};
         } catch {
           return {};
         }
       }
 
-      function setDailyData(data) {
-        localStorage.setItem("nawawiDaily", JSON.stringify(data));
+      function saveState() {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(dailyData));
       }
 
+      function emptyDay() {
+        return {
+          checks: Array(OBJECTIFS.length).fill(false),
+          intent: "",
+          percent: 0,
+          validated: false,
+        };
+      }
+
+      // --------- ÉTAT ---------
+      let dailyData = loadState();
+      const currentDay = todayKey();
+      if (!dailyData[currentDay]) dailyData[currentDay] = emptyDay();
+
+      // --------- DOM ---------
       const todosEl = document.getElementById("todos");
       const progressTextEl = document.getElementById("progressText");
       const progressFillEl = document.getElementById("progressFill");
-      const recapBody = document.getElementById("recapBody");
-      const barGraphEl = document.getElementById("barGraph");
-      const heatmapEl = document.getElementById("heatmap");
-      const objectifsStatsBody = document.getElementById("objectifsStatsBody");
-      const badgesRow = document.getElementById("badgesRow");
+      const todayLabel = document.getElementById("todayLabel");
       const intentInput = document.getElementById("intent");
       const intentBox = document.getElementById("intentBox");
-      const todayLabel = document.getElementById("todayLabel");
-      const targetPercentInput = document.getElementById("targetPercent");
+      const resetDayBtn = document.getElementById("resetDay");
+      const validateDayBtn = document.getElementById("validateDay");
+      const recapBody = document.getElementById("recapBody");
+      const confirmOverlay = document.getElementById("confirmOverlay");
+      const confirmMessageEl = document.getElementById("confirmMessage");
+      const confirmCancelBtn = document.getElementById("confirmCancel");
+      const confirmOkBtn = document.getElementById("confirmOk");
 
-      let dailyData = getDailyData();
-      const currentDay = todayKey();
+      todayLabel.textContent = "Aujourd'hui : " + currentDay;
 
-      if (!dailyData[currentDay]) {
-        dailyData[currentDay] = {
-          checks: Array(OBJECTIFS.length).fill(false),
-          percent: 0,
-          intent: "",
-        };
-        setDailyData(dailyData);
+      // --------- PROGRESSION ---------
+      function updateProgress() {
+        const state = dailyData[currentDay];
+        const total = OBJECTIFS.length;
+        const doneCount = state.checks.filter(Boolean).length;
+        const percent = total === 0 ? 0 : Math.round((doneCount / total) * 100);
+
+        state.percent = percent;
+        saveState();
+
+        // maj texte + barre
+        progressTextEl.textContent =
+          "Progression : " + doneCount + " / " + total + " (" + percent + "%)";
+        progressFillEl.style.width = percent + "%";
       }
 
-      // Affichage clair de la date du jour
-      todayLabel.textContent = "Aujourd'hui : " + formatDateFR(currentDay);
-
-      // --- Intention du jour ---
+      // --------- INTENTION ---------
       function renderIntent() {
         const state = dailyData[currentDay];
-        intentInput.value = state.intent || "";
+        intentInput.value = state.intent;
         if (state.intent && state.intent.trim().length > 0) {
           intentBox.style.display = "block";
           intentBox.textContent = "Intention : " + state.intent;
@@ -676,55 +760,37 @@
         }
       }
 
-      intentInput.addEventListener("change", () => {
+      intentInput.addEventListener("input", () => {
         const state = dailyData[currentDay];
         state.intent = intentInput.value.trim();
-        setDailyData(dailyData);
+        saveState();
         renderIntent();
       });
 
-      // --- Progression journée ---
-      function updateCurrentDayPercent() {
-        const state = dailyData[currentDay];
-        const doneCount = state.checks.filter(Boolean).length;
-        const percent = Math.floor((doneCount / OBJECTIFS.length) * 100);
-        state.percent = percent;
-        setDailyData(dailyData);
-
-        progressFillEl.style.width = percent + "%";
-        progressTextEl.textContent = `Progression : ${doneCount} / ${OBJECTIFS.length} (${percent}%)`;
-      }
-
+      // --------- TODOS ---------
       function renderTodos() {
         todosEl.innerHTML = "";
         const state = dailyData[currentDay];
-        const checks = state.checks;
+        const isValidated = state.validated;
 
-        OBJECTIFS.forEach((obj, i) => {
+        OBJECTIFS.forEach((text, index) => {
           const li = document.createElement("li");
-          li.className = "todo" + (checks[i] ? " checked" : "");
+          li.className = "todo" + (state.checks[index] ? " checked" : "");
 
           const checkbox = document.createElement("input");
           checkbox.type = "checkbox";
-          checkbox.id = "c" + i;
-          checkbox.checked = !!checks[i];
+          checkbox.checked = !!state.checks[index];
+          checkbox.disabled = isValidated;
 
           const label = document.createElement("label");
-          label.htmlFor = "c" + i;
-          label.textContent = obj;
+          label.textContent = text;
 
-          // handler SANS re-render complet de la liste
-          checkbox.addEventListener("change", (e) => {
-            const checked = e.target.checked;
-            state.checks[i] = checked;
-            setDailyData(dailyData);
-            li.classList.toggle("checked", checked);
-            updateCurrentDayPercent();
-            renderRecap();
-            renderBars();
-            renderHeatmap();
-            renderObjectifsStats();
-            renderBadges();
+          checkbox.addEventListener("change", () => {
+            if (state.validated) return;
+            state.checks[index] = checkbox.checked;
+            li.classList.toggle("checked", checkbox.checked);
+            saveState();
+            updateProgress();
           });
 
           li.appendChild(checkbox);
@@ -732,31 +798,64 @@
           todosEl.appendChild(li);
         });
 
-        updateCurrentDayPercent();
+        updateProgress(); // calcul initial
       }
 
-      // Reset journée
-      document.getElementById("resetDay").addEventListener("click", () => {
-        dailyData[currentDay] = {
-          checks: Array(OBJECTIFS.length).fill(false),
-          percent: 0,
-          intent: "",
+      // --------- POPUP CONFIRM ---------
+      function openConfirm(message, onOk) {
+        confirmMessageEl.textContent = message;
+        confirmOverlay.style.display = "flex";
+
+        const handleCancel = () => {
+          confirmOverlay.style.display = "none";
+          cleanup();
         };
-        setDailyData(dailyData);
-        renderTodos();
-        renderIntent();
-        renderRecap();
-        renderBars();
-        renderHeatmap();
-        renderObjectifsStats();
-        renderBadges();
+        const handleOk = () => {
+          confirmOverlay.style.display = "none";
+          cleanup();
+          if (typeof onOk === "function") onOk();
+        };
+        function cleanup() {
+          confirmCancelBtn.removeEventListener("click", handleCancel);
+          confirmOkBtn.removeEventListener("click", handleOk);
+        }
+
+        confirmCancelBtn.addEventListener("click", handleCancel);
+        confirmOkBtn.addEventListener("click", handleOk);
+      }
+
+      // --------- BOUTONS ---------
+      resetDayBtn.addEventListener("click", () => {
+        openConfirm("Remettre à zéro toutes les cases et l’intention pour aujourd’hui ?", () => {
+          dailyData[currentDay] = emptyDay();
+          saveState();
+          renderTodos();
+          renderIntent();
+          renderRecap();
+        });
       });
 
-      // --- Récap jours ---
-      function renderRecap() {
-        dailyData = getDailyData();
-        recapBody.innerHTML = "";
+      validateDayBtn.addEventListener("click", () => {
+        const state = dailyData[currentDay];
+        const total = OBJECTIFS.length;
+        const doneCount = state.checks.filter(Boolean).length;
+        const percent = total === 0 ? 0 : Math.round((doneCount / total) * 100);
 
+        openConfirm(
+          `Valider la journée avec ${doneCount} objectifs sur ${total} (${percent}%) ?`,
+          () => {
+            state.percent = percent;
+            state.validated = true;
+            saveState();
+            renderTodos();
+            renderRecap();
+          }
+        );
+      });
+
+      // --------- RÉCAP SIMPLE ---------
+      function renderRecap() {
+        recapBody.innerHTML = "";
         const dates = Object.keys(dailyData).sort();
         if (dates.length === 0) {
           const tr = document.createElement("tr");
@@ -769,29 +868,15 @@
           return;
         }
 
-        dates.forEach((d) => {
-          const info = dailyData[d];
-          if (!info.checks) info.checks = Array(OBJECTIFS.length).fill(false);
-          if (typeof info.percent !== "number") {
-            const done = info.checks.filter(Boolean).length;
-            info.percent = Math.floor((done / OBJECTIFS.length) * 100);
-          }
-        });
-        setDailyData(dailyData);
-
         let prevPercent = null;
         dates.forEach((d) => {
           const info = dailyData[d];
-          const percent = info.percent ?? 0;
+          const percent = info.percent || 0;
 
           const tr = document.createElement("tr");
 
           const tdDate = document.createElement("td");
-          if (d === currentDay) {
-            tdDate.textContent = "Aujourd'hui (" + formatDateFR(d) + ")";
-          } else {
-            tdDate.textContent = formatDateFR(d);
-          }
+          tdDate.textContent = d === currentDay ? "Aujourd'hui (" + d + ")" : d;
           tr.appendChild(tdDate);
 
           const tdPercent = document.createElement("td");
@@ -820,226 +905,10 @@
         });
       }
 
-      // --- Graph 7 derniers jours (planning hebdo) ---
-      function renderBars() {
-        barGraphEl.innerHTML = "";
-        const dates = Object.keys(dailyData).sort();
-        if (dates.length === 0) return;
-
-        const last7 = dates.slice(-7);
-        last7.forEach((d) => {
-          const info = dailyData[d];
-          const percent = info.percent ?? 0;
-
-          const barWrapper = document.createElement("div");
-
-          const bar = document.createElement("div");
-          bar.className = "bar";
-          const fill = document.createElement("div");
-          fill.className = "bar-fill";
-          fill.style.height = percent + "%";
-          bar.appendChild(fill);
-
-          const jsDate = new Date(d);
-
-          const labelDay = document.createElement("div");
-          labelDay.className = "bar-label";
-          labelDay.textContent = jsDate.toLocaleDateString("fr-FR", { weekday: "short" }); // lun, mar...
-
-          const labelNum = document.createElement("div");
-          labelNum.className = "bar-label";
-          labelNum.textContent = jsDate.getDate(); // 29, 30...
-
-          barWrapper.appendChild(bar);
-          barWrapper.appendChild(labelDay);
-          barWrapper.appendChild(labelNum);
-          barGraphEl.appendChild(barWrapper);
-        });
-      }
-
-      // --- Heatmap mensuelle ---
-      function renderHeatmap() {
-        heatmapEl.innerHTML = "";
-
-        const now = new Date();
-        const year = now.getFullYear();
-        const month = now.getMonth();
-        const firstDay = new Date(year, month, 1);
-        const startWeekday = (firstDay.getDay() + 6) % 7;
-        const lastDay = new Date(year, month + 1, 0).getDate();
-
-        const labels = ["L", "M", "M", "J", "V", "S", "D"];
-        labels.forEach((l) => {
-          const div = document.createElement("div");
-          div.className = "heat-label";
-          div.textContent = l;
-          heatmapEl.appendChild(div);
-        });
-
-        for (let i = 0; i < startWeekday; i++) {
-          const cell = document.createElement("div");
-          cell.className = "heat-cell heat-0";
-          cell.textContent = "";
-          heatmapEl.appendChild(cell);
-        }
-
-        for (let d = 1; d <= lastDay; d++) {
-          const dateKey = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(
-            2,
-            "0"
-          )}`;
-          const info = dailyData[dateKey];
-          const percent = info ? info.percent ?? 0 : 0;
-          let clazz = "heat-0";
-          if (percent >= 100) clazz = "heat-100";
-          else if (percent >= 75) clazz = "heat-75";
-          else if (percent >= 50) clazz = "heat-50";
-          else if (percent >= 25) clazz = "heat-25";
-
-          const cell = document.createElement("div");
-          cell.className = "heat-cell " + clazz;
-          cell.title = `${percent}%`;
-          cell.textContent = d; // numéro du jour dans la cellule
-          heatmapEl.appendChild(cell);
-        }
-      }
-
-      // --- Stats par objectif ---
-      function renderObjectifsStats() {
-        objectifsStatsBody.innerHTML = "";
-        const dates = Object.keys(dailyData);
-        if (dates.length === 0) {
-          const tr = document.createElement("tr");
-          const td = document.createElement("td");
-          td.colSpan = 3;
-          td.className = "empty";
-          td.textContent = "Pas encore de données.";
-          tr.appendChild(td);
-          objectifsStatsBody.appendChild(tr);
-          return;
-        }
-
-        const totalDays = dates.length;
-        const counts = Array(OBJECTIFS.length).fill(0);
-
-        dates.forEach((d) => {
-          const info = dailyData[d];
-          if (!info.checks) return;
-          info.checks.forEach((checked, idx) => {
-            if (checked) counts[idx]++;
-          });
-        });
-
-        OBJECTIFS.forEach((obj, i) => {
-          const tr = document.createElement("tr");
-          const tdIndex = document.createElement("td");
-          tdIndex.textContent = i + 1;
-          tr.appendChild(tdIndex);
-
-          const tdObj = document.createElement("td");
-          tdObj.textContent = obj;
-          tr.appendChild(tdObj);
-
-          const tdPercent = document.createElement("td");
-          const percent = Math.floor((counts[i] / totalDays) * 100);
-          tdPercent.textContent = isNaN(percent) ? "0 %" : percent + " %";
-          tdPercent.className = percent >= 70 ? "percent-good" : "percent-bad";
-          tr.appendChild(tdPercent);
-
-          objectifsStatsBody.appendChild(tr);
-        });
-      }
-
-      // --- Badges & objectif 7 jours ---
-      function renderBadges() {
-        badgesRow.innerHTML = "";
-        const dates = Object.keys(dailyData).sort();
-        if (dates.length === 0) {
-          const span = document.createElement("span");
-          span.className = "info";
-          span.textContent = "Aucun badge pour le moment.";
-          badgesRow.appendChild(span);
-          return;
-        }
-
-        const target = parseInt(targetPercentInput.value || "70", 10);
-
-        let currentStreak = 0;
-        let longestStreak = 0;
-        dates.forEach((d) => {
-          const p = dailyData[d].percent ?? 0;
-          if (p >= target) {
-            currentStreak++;
-            if (currentStreak > longestStreak) longestStreak = currentStreak;
-          } else {
-            currentStreak = 0;
-          }
-        });
-
-        const badges = [];
-        if (longestStreak >= 3) badges.push("3 jours consécutifs ≥ " + target + "%");
-        if (longestStreak >= 7) badges.push("7 jours consécutifs ≥ " + target + "%");
-        if (longestStreak >= 10) badges.push("10 jours consécutifs ≥ " + target + "%");
-        if (dates.some((d) => (dailyData[d].percent ?? 0) === 100))
-          badges.push("Au moins 1 journée à 100%");
-
-        if (badges.length === 0) {
-          const span = document.createElement("span");
-          span.className = "info";
-          span.textContent = "Aucun badge pour le moment.";
-          badgesRow.appendChild(span);
-        } else {
-          badges.forEach((b) => {
-            const el = document.createElement("span");
-            el.className = "badge-small";
-            el.textContent = b;
-            badgesRow.appendChild(el);
-          });
-        }
-      }
-
-      targetPercentInput.addEventListener("change", () => {
-        renderBadges();
-      });
-
-      // --- Export CSV ---
-      document.getElementById("btnExport").addEventListener("click", () => {
-        const dates = Object.keys(dailyData).sort();
-        if (dates.length === 0) {
-          alert("Aucune donnée à exporter.");
-          return;
-        }
-
-        const header = ["date", "percent"].concat(OBJECTIFS.map((_, i) => "obj_" + (i + 1)));
-        const rows = [header.join(";")];
-
-        dates.forEach((d) => {
-          const info = dailyData[d];
-          const checks = info.checks || [];
-          const line = [d, info.percent ?? 0].concat(OBJECTIFS.map((_, i) => (checks[i] ? 1 : 0)));
-          rows.push(line.join(";"));
-        });
-
-        const csv = rows.join("\n");
-        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "nawawi_habits.csv";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      });
-
-      // INIT
+      // --------- INIT ---------
       renderIntent();
       renderTodos();
       renderRecap();
-      renderBars();
-      renderHeatmap();
-      renderObjectifsStats();
-      renderBadges();
     </script>
   </body>
 </html>
