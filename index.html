@@ -616,7 +616,9 @@
 
       function formatDateFR(key) {
         const [y, m, d] = key.split("-").map(Number);
-        return new Date(y, m - 1, d).toLocaleDateString("fr-FR");
+        const date = new Date(y, m - 1, d);
+        const options = { weekday: "long", year: "numeric", month: "long", day: "numeric" };
+        return date.toLocaleDateString("fr-FR", options); // ex: samedi 29 décembre 2025
       }
 
       // --- Storage ---
@@ -659,7 +661,8 @@
         setDailyData(dailyData);
       }
 
-      todayLabel.textContent = formatDateFR(currentDay);
+      // Affichage clair de la date du jour
+      todayLabel.textContent = "Aujourd'hui : " + formatDateFR(currentDay);
 
       // --- Intention du jour ---
       function renderIntent() {
@@ -700,23 +703,33 @@
         OBJECTIFS.forEach((obj, i) => {
           const li = document.createElement("li");
           li.className = "todo" + (checks[i] ? " checked" : "");
-          li.innerHTML = `
-            <input type="checkbox" id="c${i}" ${checks[i] ? "checked" : ""}>
-            <label for="c${i}">${obj}</label>
-          `;
-          todosEl.appendChild(li);
 
-          const checkbox = li.querySelector("input");
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.id = "c" + i;
+          checkbox.checked = !!checks[i];
+
+          const label = document.createElement("label");
+          label.htmlFor = "c" + i;
+          label.textContent = obj;
+
+          // handler SANS re-render complet de la liste
           checkbox.addEventListener("change", (e) => {
-            state.checks[i] = e.target.checked;
+            const checked = e.target.checked;
+            state.checks[i] = checked;
             setDailyData(dailyData);
-            renderTodos();
+            li.classList.toggle("checked", checked);
+            updateCurrentDayPercent();
             renderRecap();
             renderBars();
             renderHeatmap();
             renderObjectifsStats();
             renderBadges();
           });
+
+          li.appendChild(checkbox);
+          li.appendChild(label);
+          todosEl.appendChild(li);
         });
 
         updateCurrentDayPercent();
@@ -774,7 +787,11 @@
           const tr = document.createElement("tr");
 
           const tdDate = document.createElement("td");
-          tdDate.textContent = formatDateFR(d);
+          if (d === currentDay) {
+            tdDate.textContent = "Aujourd'hui (" + formatDateFR(d) + ")";
+          } else {
+            tdDate.textContent = formatDateFR(d);
+          }
           tr.appendChild(tdDate);
 
           const tdPercent = document.createElement("td");
@@ -803,7 +820,7 @@
         });
       }
 
-      // --- Graph 7 derniers jours ---
+      // --- Graph 7 derniers jours (planning hebdo) ---
       function renderBars() {
         barGraphEl.innerHTML = "";
         const dates = Object.keys(dailyData).sort();
@@ -815,6 +832,7 @@
           const percent = info.percent ?? 0;
 
           const barWrapper = document.createElement("div");
+
           const bar = document.createElement("div");
           bar.className = "bar";
           const fill = document.createElement("div");
@@ -822,13 +840,19 @@
           fill.style.height = percent + "%";
           bar.appendChild(fill);
 
-          const label = document.createElement("div");
           const jsDate = new Date(d);
-          label.className = "bar-label";
-          label.textContent = jsDate.getDate();
+
+          const labelDay = document.createElement("div");
+          labelDay.className = "bar-label";
+          labelDay.textContent = jsDate.toLocaleDateString("fr-FR", { weekday: "short" }); // lun, mar...
+
+          const labelNum = document.createElement("div");
+          labelNum.className = "bar-label";
+          labelNum.textContent = jsDate.getDate(); // 29, 30...
 
           barWrapper.appendChild(bar);
-          barWrapper.appendChild(label);
+          barWrapper.appendChild(labelDay);
+          barWrapper.appendChild(labelNum);
           barGraphEl.appendChild(barWrapper);
         });
       }
@@ -875,7 +899,7 @@
           const cell = document.createElement("div");
           cell.className = "heat-cell " + clazz;
           cell.title = `${percent}%`;
-          cell.textContent = "";
+          cell.textContent = d; // numéro du jour dans la cellule
           heatmapEl.appendChild(cell);
         }
       }
@@ -940,7 +964,6 @@
 
         const target = parseInt(targetPercentInput.value || "70", 10);
 
-        // streak global de jours >= target
         let currentStreak = 0;
         let longestStreak = 0;
         dates.forEach((d) => {
@@ -998,7 +1021,7 @@
         });
 
         const csv = rows.join("\n");
-        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" }); // [web:62][web:65]
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
